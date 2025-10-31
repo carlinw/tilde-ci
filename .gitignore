@@ -1,0 +1,23 @@
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+test-reports/
+
+# Ruby
+.bundle/
+vendor/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+build.log
+unit-test.log
+
+# Temporary files
+*.swp
+*~
+.*.sw?

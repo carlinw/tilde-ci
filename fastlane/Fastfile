@@ -1,0 +1,37 @@
+default_platform(:mac)
+
+# Get the path to the tilde-mac project
+# In CI, this will be set via ENV variable, locally it defaults to ../tilde-mac
+TILDE_MAC_PATH = ENV['PROJECT_DIR'] || '../tilde-mac'
+
+platform :mac do
+
+  desc "Run all UI tests on macOS"
+  lane :test do
+    run_tests(
+      project: "#{TILDE_MAC_PATH}/Tilde.xcodeproj",
+      scheme: "TildeUITests",
+      destination: "platform=macOS",
+      xcargs: "CODE_SIGN_IDENTITY='-' CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO",
+      output_directory: "./test-reports",
+      output_types: "html,junit"
+    )
+  end
+
+  desc "Build Tilde app"
+  lane :build do
+    xcodebuild(
+      project: "#{TILDE_MAC_PATH}/Tilde.xcodeproj",
+      scheme: "Tilde-Package",
+      configuration: "Debug",
+      xcargs: "CODE_SIGN_IDENTITY='-' CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO"
+    )
+  end
+
+  desc "Build and test"
+  lane :ci do
+    build
+    test
+  end
+
+end

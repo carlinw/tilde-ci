@@ -1,0 +1,117 @@
+name: Build and Test Tilde
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual triggering
+  schedule:
+    # Run daily at 2 AM UTC to catch any issues
+    - cron: '0 2 * * *'
+
+jobs:
+  build-and-test:
+    runs-on: self-hosted
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout tilde-ci repository
+        uses: actions/checkout@v4
+        with:
+          path: tilde-ci
+
+      - name: Checkout tilde-mac repository
+        uses: actions/checkout@v4
+        with:
+          repository: carlinw/tilde-mac
+          path: tilde-mac
+          fetch-depth: 0
+          token: ${{ secrets.TILDE_MAC_PAT || github.token }}
+
+      - name: Clean previous builds
+        run: |
+          cd tilde-mac
+          ./clean.sh || true
+          rm -rf test-reports || true
+        continue-on-error: true
+
+      - name: Build Mac app
+        run: |
+          cd tilde-mac
+          ./build.sh | tee ../build.log
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+
+      - name: Extract build number
+        id: build_info
+        run: |
+          BUILD_VERSION=$(grep "Build complete! Version:" tilde-mac/build.log | tail -1 | awk '{print $NF}' || echo "unknown")
+          echo "version=$BUILD_VERSION" >> $GITHUB_OUTPUT
+          echo "Build Version: $BUILD_VERSION"
+
+      - name: Run unit tests
+        run: |
+          cd tilde-mac
+          swift test --parallel 2>&1 | tee ../unit-test.log || echo "Unit tests completed with some failures"
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        continue-on-error: true
+
+      - name: Run UI tests
+        run: |
+          cd tilde-ci
+          bundle install
+          bundle exec fastlane test --verbose
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+          # Point to the tilde-mac directory for the actual tests
+          PROJECT_DIR: ../tilde-mac
+        continue-on-error: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports-${{ github.run_number }}-${{ steps.build_info.outputs.version }}
+          path: |
+            tilde-mac/test-reports/
+            tilde-ci/test-reports/
+            tilde-mac/.build/
+            build.log
+            unit-test.log
+          retention-days: 30
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results - Build ${{ steps.build_info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** tilde-mac" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** $(cd tilde-mac && git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Version:** ${{ steps.build_info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Unit test summary
+          if [ -f "unit-test.log" ]; then
+            echo "### Unit Tests" >> $GITHUB_STEP_SUMMARY
+            grep -E "Test Suite|tests passed|tests failed" unit-test.log | tail -5 >> $GITHUB_STEP_SUMMARY || echo "Unit test results not available" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # UI test summary
+          if [ -d "tilde-mac/test-reports" ] || [ -d "tilde-ci/test-reports" ]; then
+            echo "### UI Tests" >> $GITHUB_STEP_SUMMARY
+            echo "Test reports generated and uploaded as artifacts" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### UI Tests" >> $GITHUB_STEP_SUMMARY
+            echo "No test reports found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Clean up the tilde-mac checkout to save space
+          cd tilde-mac
+          ./clean.sh || true
+        continue-on-error: true
